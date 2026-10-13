@@ -66,6 +66,13 @@ pub struct WindowState {
     /// The last received configure.
     pub last_configure: Option<WindowConfigure>,
 
+    /// Runtime visibility; None preserves upstream's initial-frame behavior.
+    pub visibility: Option<bool>,
+    remapping: bool,
+    pub app_id: Option<String>,
+    restore_maximized: bool,
+    restore_fullscreen: bool,
+
     /// The pointers observed on the window.
     pub pointers: Vec<Weak<ThemedPointer<WinitPointerData>>>,
 
@@ -201,6 +208,11 @@ impl WindowState {
             ime_allowed: false,
             ime_purpose: ImePurpose::Normal,
             last_configure: None,
+            visibility: None,
+            remapping: false,
+            app_id: None,
+            restore_maximized: false,
+            restore_fullscreen: false,
             max_inner_size: None,
             min_inner_size: MIN_WINDOW_SIZE,
             resize_increments: None,
@@ -239,6 +251,50 @@ impl WindowState {
         self.frame_callback_state
     }
 
+    pub fn is_visible(&self) -> Option<bool> {
+        self.visibility.map(|visible| visible && !self.remapping)
+    }
+
+    pub fn set_visible(&mut self, visible: bool) {
+        if self.visibility == Some(visible) {
+            return;
+        }
+        let previous = self.visibility;
+        self.visibility = Some(visible);
+        self.frame_callback_reset();
+        if !visible {
+            if let Some(configure) = &self.last_configure {
+                self.restore_maximized = configure.is_maximized();
+                self.restore_fullscreen = configure.is_fullscreen();
+            }
+            self.remapping = false;
+            self.last_configure = None;
+            self.frame = None;
+            self.window.wl_surface().attach(None, 0, 0);
+            self.window.commit();
+        } else if previous == Some(false) {
+            self.remapping = true;
+            self.window.set_title(self.title.clone());
+            if let Some(app_id) = &self.app_id {
+                self.window.set_app_id(app_id.clone());
+            }
+            if self.restore_fullscreen {
+                self.window.set_fullscreen(None);
+            } else if self.restore_maximized {
+                self.window.set_maximized();
+            }
+            self.window.set_min_size(Some((
+                self.min_inner_size.width,
+                self.min_inner_size.height,
+            )));
+            self.window
+                .set_max_size(self.max_inner_size.map(|size| (size.width, size.height)));
+            // Remapping must configure before the renderer attaches a buffer.
+            self.window.commit();
+        }
+        let _ = self.connection.flush();
+    }
+
     /// The frame callback was received, but not yet sent to the user.
     pub fn frame_callback_received(&mut self) {
         self.frame_callback_state = FrameCallbackState::Received;
@@ -267,6 +323,11 @@ impl WindowState {
         shm: &Shm,
         subcompositor: &Option<Arc<SubcompositorState>>,
     ) -> bool {
+        if self.visibility == Some(false) {
+            // A configure may already have been queued when the window hid.
+            return false;
+        }
+        self.remapping = false;
         // NOTE: when using fractional scaling or wl_compositor@v6 the scaling
         // should be delivered before the first configure, thus apply it to
         // properly scale the physical sizes provided by the users.

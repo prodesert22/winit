@@ -126,7 +126,8 @@ impl Window {
 
         // Set the app_id.
         if let Some(name) = attributes.platform_specific.name.map(|name| name.general) {
-            window.set_app_id(name);
+            window.set_app_id(name.clone());
+            window_state.app_id = Some(name);
         }
 
         // Set the window title.
@@ -250,13 +251,14 @@ impl Window {
     }
 
     #[inline]
-    pub fn set_visible(&self, _visible: bool) {
-        // Not possible on Wayland.
+    pub fn set_visible(&self, visible: bool) {
+        self.window_state.lock().unwrap().set_visible(visible);
+        self.request_redraw();
     }
 
     #[inline]
     pub fn is_visible(&self) -> Option<bool> {
-        None
+        self.window_state.lock().unwrap().is_visible()
     }
 
     #[inline]

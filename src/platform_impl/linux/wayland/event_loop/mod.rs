@@ -483,7 +483,8 @@ impl<T: 'static> EventLoop<T> {
                 let mut window =
                     state.windows.get_mut().get_mut(window_id).unwrap().lock().unwrap();
 
-                if window.frame_callback_state() == FrameCallbackState::Requested {
+                let visible = window.is_visible().unwrap_or(true);
+                if visible && window.frame_callback_state() == FrameCallbackState::Requested {
                     return None;
                 }
 
@@ -493,7 +494,9 @@ impl<T: 'static> EventLoop<T> {
                     window_requests.get(window_id).unwrap().take_redraw_requested();
 
                 // Redraw the frame while at it.
-                redraw_requested |= window.refresh_frame();
+                if visible {
+                    redraw_requested |= window.refresh_frame();
+                }
 
                 redraw_requested.then_some(WindowEvent::RedrawRequested)
             });
